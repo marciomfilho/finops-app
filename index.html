@@ -3,11 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GCP FinOps Dashboard</title>
+  <title>FinOps Dashboard V2</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
 </head>
 <body>
   <!-- LOGIN SCREEN -->
@@ -49,7 +51,7 @@
           <path d="M24 12L36 30H12L24 12Z" fill="white" opacity="0.9"/>
           <circle cx="24" cy="32" r="4" fill="white"/>
         </svg>
-        <span>GCP FinOps</span>
+        <span>FinOps V2</span>
       </div>
       <nav class="sidebar-nav">
         <a href="#" class="nav-item active" data-page="overview">
@@ -72,6 +74,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           Tendências
         </a>
+        <a href="#" class="nav-item" data-page="budget">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+          Orçamento
+        </a>
+        <a href="#" class="nav-item" data-page="ai-chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Chat IA
+        </a>
       </nav>
       <div class="sidebar-footer">
         <div class="user-info" id="user-info">
@@ -81,6 +91,9 @@
             <span class="user-org" id="user-org">Organização</span>
           </div>
         </div>
+        <button id="btn-huawei-config" class="btn-config" title="Configurar Huawei Cloud">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+        </button>
         <button id="btn-logout" class="btn-logout" title="Sair">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
         </button>
@@ -104,7 +117,12 @@
             <button class="period-btn" data-period="180">6 meses</button>
             <button class="period-btn" data-period="365">1 ano</button>
           </div>
+          <button id="btn-import-csv" class="btn-import" title="Importar CSV">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Importar CSV
+          </button>
           <div class="last-update" id="last-update">Atualizando...</div>
+          <div class="demo-badge hidden" id="demo-badge">DEMO</div>
         </div>
       </header>
 
@@ -153,6 +171,7 @@
               <option value="name">Nome</option>
             </select>
           </div>
+          <div class="rec-filters" id="project-provider-filters"></div>
           <div class="projects-grid" id="projects-grid"></div>
           <div class="chart-card full-width">
             <div class="chart-header"><h3>Comparativo de Projetos — Mês Atual vs Anterior</h3></div>
@@ -189,12 +208,28 @@
             </div>
           </div>
           <div class="charts-row">
+            <div class="chart-card wide">
+              <div class="chart-header"><h3>Custo por Provider ao Longo do Tempo</h3></div>
+              <canvas id="chart-provider-timeline"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-header"><h3>Breakdown de Custo por Provider</h3></div>
+              <canvas id="chart-provider-breakdown"></canvas>
+            </div>
+          </div>
+          <div class="charts-row">
             <div class="chart-card full-width">
               <div class="chart-header"><h3>Heatmap de Gastos por Dia da Semana</h3></div>
               <canvas id="chart-heatmap"></canvas>
             </div>
           </div>
         </div>
+
+        <!-- BUDGET PAGE -->
+        <div class="page" id="page-budget"></div>
+
+        <!-- AI CHAT PAGE -->
+        <div class="page" id="page-ai-chat"></div>
       </div>
     </main>
   </div>
@@ -202,7 +237,20 @@
   <div id="toast-container" class="toast-container"></div>
 
   <script src="config.js"></script>
+  <script src="demo-data.js"></script>
+  <script src="data-bus.js"></script>
   <script src="gcp-api.js"></script>
+  <script src="huawei-api.js"></script>
+  <script src="csv-importer.js"></script>
+  <script src="gemini-api.js"></script>
+  <script src="ai-agent.js"></script>
+  <script src="pages/overview.js"></script>
+  <script src="pages/projects.js"></script>
+  <script src="pages/waste.js"></script>
+  <script src="pages/recommendations.js"></script>
+  <script src="pages/trends.js"></script>
+  <script src="pages/ai-chat.js"></script>
+  <script src="pages/budget.js"></script>
   <script src="charts.js"></script>
   <script src="app.js"></script>
 </body>

@@ -1,24 +1,47 @@
 /**
- * GCP FinOps Dashboard — Main Application
+ * GCP FinOps Dashboard V2 — Main Application Shell
+ * Orchestrates DataBus, providers, routing, lazy loading and modals.
  */
 
 const App = (() => {
-  let data = null;
   let currentPeriod = 30;
-  let recFilter = 'all';
   let isDemo = false;
+
+  // Pages already loaded via <script> tags in index.html — no dynamic load needed
+  const PRELOADED_PAGES = new Set([
+    'overview', 'projects', 'waste', 'recommendations', 'trends', 'ai-chat', 'budget'
+  ]);
+
+  // Track which pages have been loaded (for lazy loading of future pages not in index.html)
+  const loadedPages = new Set(PRELOADED_PAGES);
 
   // ── Init ──────────────────────────────────────────────────────────────────
   function init() {
-    // Verifica se voltou de um redirect OAuth2
+    // Register real providers in DataBus (DEMO_DATA is handled internally by DataBus as fallback)
+    DataBus.registerProvider(GCP_API);
+    DataBus.registerProvider(HUAWEI_API);
+
+    // Re-render current page whenever DataBus fires an update
+    DataBus.onUpdate(data => {
+      isDemo = !!data.isDemo;
+      _updateDemoBadge(isDemo);
+      updateLastUpdate();
+      const activePage = document.querySelector('.nav-item.active');
+      if (activePage) renderPage(activePage.dataset.page);
+    });
+
+    // Handle OAuth2 redirect callback
     if (GCP_API.handleRedirectCallback()) {
       showLoading();
-      loadRealData();
+      _loadData();
       return;
     }
+
     bindLoginEvents();
     bindNavEvents();
     bindTopbarEvents();
+    bindHuaweiConfigButton();
+    bindCSVImportButton();
   }
 
   // ── Login ─────────────────────────────────────────────────────────────────
@@ -29,97 +52,70 @@ const App = (() => {
         return;
       }
       showLoading();
-      GCP_API.signIn(); // redireciona a página
+      GCP_API.signIn();
     });
 
     document.getElementById('btn-demo').addEventListener('click', () => {
       isDemo = true;
-      loadDemoData();
+      _loadData();
     });
 
     document.getElementById('btn-logout').addEventListener('click', () => {
       GCP_API.signOut();
       document.getElementById('app').classList.add('hidden');
       document.getElementById('login-screen').classList.remove('hidden');
-      data = null;
       showToast('Sessão encerrada', 'info');
     });
   }
 
-  // ── Load Data ─────────────────────────────────────────────────────────────
-  async function loadRealData() {
+  // ── Data Loading via DataBus ──────────────────────────────────────────────
+  async function _loadData() {
     showLoading();
     try {
-      const user = await GCP_API.getUserInfo();
-      const accounts = await GCP_API.getBillingAccounts();
-      if (!accounts.length) throw new Error('Nenhuma conta de faturamento encontrada');
+      const data = await DataBus.load(currentPeriod);
+      isDemo = !!data.isDemo;
+      _renderApp(data);
 
-      const billingId = accounts[0].name;
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - currentPeriod);
-
-      const [costData, budgets] = await Promise.all([
-        GCP_API.getCostData(billingId, startDate, endDate),
-        GCP_API.getBudgets(billingId)
-      ]);
-
-      data = transformRealData(costData, budgets, user);
-      renderApp(user);
+      // Trigger AI auto-analysis after data loads
+      if (typeof AIAgent !== 'undefined' && !AIAgent.isDisabled()) {
+        AIAgent.autoAnalyze(data).then(insights => {
+          if (insights && insights.length > 0) {
+            console.info('[App] AI insights:', insights.length);
+          }
+        }).catch(err => {
+          console.warn('[App] autoAnalyze error:', err.message);
+        });
+      }
     } catch (err) {
       hideLoading();
-      showToast(`Erro ao carregar dados: ${err.message}. Usando dados de demonstração.`, 'error');
-      loadDemoData();
+      showToast('Erro ao carregar dados: ' + err.message, 'error');
     }
   }
 
-  function loadDemoData() {
-    showLoading();
-    setTimeout(() => {
-      try {
-        data = DEMO_DATA.generate(currentPeriod);
-        renderApp(data.user);
-        if (isDemo) showToast('Modo demonstração ativo — dados simulados', 'info');
-      } catch (err) {
-        hideLoading();
-        showToast('Erro ao carregar demo: ' + err.message, 'error');
-        console.error(err);
-      }
-    }, 600);
-  }
-
-  function transformRealData(costData, budgets, user) {
-    // Transform Cloud Billing API response to internal format
-    const rows = costData.rows || [];
-    const projectMap = {};
-    rows.forEach(row => {
-      const projectId = row.dimensions?.find(d => d.key === 'project_id')?.value || 'unknown';
-      const service = row.dimensions?.find(d => d.key === 'service_description')?.value || 'Other';
-      const cost = parseFloat(row.metrics?.find(m => m.key === 'cost')?.value || 0);
-      if (!projectMap[projectId]) projectMap[projectId] = { id: projectId, name: projectId, services: {}, currentCost: 0 };
-      projectMap[projectId].currentCost += cost;
-      projectMap[projectId].services[service] = (projectMap[projectId].services[service] || 0) + cost;
-    });
-    // Fallback to demo if no data
-    if (!Object.keys(projectMap).length) return DEMO_DATA.generate(currentPeriod);
-    return DEMO_DATA.generate(currentPeriod); // Extend with real data mapping as needed
-  }
-
   // ── Render App ────────────────────────────────────────────────────────────
-  function renderApp(user) {
+  function _renderApp(data) {
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
-    setUserInfo(user);
+
+    const user = data.user || (GCP_API.currentUser) || { name: 'Usuário', org: 'FinOps V2' };
+    _setUserInfo(user);
+    _updateDemoBadge(isDemo);
     updateLastUpdate();
+
     bindNavEvents();
     bindTopbarEvents();
+    bindHuaweiConfigButton();
+    bindCSVImportButton();
+
     navigateTo('overview');
     hideLoading();
+
+    if (isDemo) showToast('Modo demonstração ativo — dados simulados', 'info');
   }
 
-  function setUserInfo(user) {
+  function _setUserInfo(user) {
     document.getElementById('user-name').textContent = user.name || user.email || 'Usuário';
-    document.getElementById('user-org').textContent = user.org || user.hd || 'GCP';
+    document.getElementById('user-org').textContent = user.org || user.hd || 'FinOps V2';
     const avatar = document.getElementById('user-avatar');
     if (user.picture) {
       avatar.innerHTML = `<img src="${user.picture}" alt="avatar" />`;
@@ -128,19 +124,25 @@ const App = (() => {
     }
   }
 
-  function updateLastUpdate() {
-    const now = new Date();
-    document.getElementById('last-update').textContent =
-      `Atualizado: ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  function _updateDemoBadge(demo) {
+    const badge = document.getElementById('demo-badge');
+    if (badge) badge.classList.toggle('hidden', !demo);
   }
 
+  function updateLastUpdate() {
+    const now = new Date();
+    const el = document.getElementById('last-update');
+    if (el) el.textContent = `Atualizado: ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+
+  // ── Navigation ────────────────────────────────────────────────────────────
   let navBound = false;
   let topbarBound = false;
 
-  // ── Navigation ────────────────────────────────────────────────────────────
   function bindNavEvents() {
     if (navBound) return;
     navBound = true;
+
     document.querySelectorAll('.nav-item').forEach(item => {
       item.addEventListener('click', e => {
         e.preventDefault();
@@ -158,23 +160,80 @@ const App = (() => {
     });
   }
 
-  function navigateTo(page) {
+  async function navigateTo(page) {
     document.querySelectorAll('.nav-item').forEach(i => i.classList.toggle('active', i.dataset.page === page));
     document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === `page-${page}`));
 
-    const titles = { overview: 'Visão Geral', projects: 'Projetos', waste: 'Desperdícios', recommendations: 'Recomendações', trends: 'Tendências' };
+    const titles = {
+      overview:        'Visão Geral',
+      projects:        'Projetos',
+      waste:           'Desperdícios',
+      recommendations: 'Recomendações',
+      trends:          'Tendências',
+      budget:          'Orçamento',
+      'ai-chat':       'Chat IA'
+    };
     document.getElementById('page-title').textContent = titles[page] || page;
 
+    // Lazy load page module if not already loaded
+    await _ensurePageLoaded(page);
+
+    const data = DataBus.getData();
     if (data) renderPage(page);
+  }
+
+  /**
+   * Lazy loads a page module via dynamic <script> tag.
+   * No-op if the page is already loaded (preloaded or previously loaded).
+   */
+  async function _ensurePageLoaded(page) {
+    if (loadedPages.has(page)) return;
+
+    return new Promise(resolve => {
+      const script = document.createElement('script');
+      script.src = `pages/${page}.js`;
+      script.onload = () => {
+        loadedPages.add(page);
+        resolve();
+      };
+      script.onerror = () => {
+        console.warn(`[App] Could not lazy-load pages/${page}.js`);
+        resolve(); // resolve anyway — page may still render with fallback
+      };
+      document.head.appendChild(script);
+    });
   }
 
   function renderPage(page) {
     switch (page) {
-      case 'overview': renderOverview(); break;
-      case 'projects': renderProjects(); break;
-      case 'waste': renderWaste(); break;
-      case 'recommendations': renderRecommendations(); break;
-      case 'trends': renderTrends(); break;
+      case 'overview':
+        if (typeof OverviewPage !== 'undefined') OverviewPage.render();
+        else _renderOverviewFallback();
+        break;
+      case 'projects':
+        if (typeof ProjectsPage !== 'undefined') ProjectsPage.render();
+        else _renderProjectsFallback();
+        break;
+      case 'waste':
+        if (typeof WastePage !== 'undefined') WastePage.render();
+        else _renderWasteFallback();
+        break;
+      case 'recommendations':
+        if (typeof RecommendationsPage !== 'undefined') RecommendationsPage.render();
+        else _renderRecommendationsFallback();
+        break;
+      case 'trends':
+        if (typeof TrendsPage !== 'undefined') TrendsPage.render();
+        else _renderTrendsFallback();
+        break;
+      case 'budget':
+        if (typeof BudgetPage !== 'undefined') BudgetPage.render();
+        break;
+      case 'ai-chat':
+        if (typeof AIChatPage !== 'undefined') AIChatPage.render();
+        break;
+      default:
+        break;
     }
   }
 
@@ -182,258 +241,262 @@ const App = (() => {
   function bindTopbarEvents() {
     if (topbarBound) return;
     topbarBound = true;
+
     document.querySelectorAll('.period-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentPeriod = parseInt(btn.dataset.period);
-        if (isDemo) loadDemoData(); else loadRealData();
+        _loadData();
       });
     });
   }
 
-  // ── OVERVIEW ──────────────────────────────────────────────────────────────
-  function renderOverview() {
+  // ── CSV Import Button ─────────────────────────────────────────────────────
+  let csvBtnBound = false;
+  function bindCSVImportButton() {
+    if (csvBtnBound) return;
+    const btn = document.getElementById('btn-import-csv');
+    if (!btn) return;
+    csvBtnBound = true;
+    btn.addEventListener('click', () => {
+      if (typeof CSVImporter !== 'undefined') {
+        CSVImporter.showImportModal('projects');
+      } else {
+        showToast('Módulo de importação CSV não disponível.', 'error');
+      }
+    });
+  }
+
+  // ── Huawei Config Modal ───────────────────────────────────────────────────
+  let huaweiBtnBound = false;
+  function bindHuaweiConfigButton() {
+    if (huaweiBtnBound) return;
+    const btn = document.getElementById('btn-huawei-config');
+    if (!btn) return;
+    huaweiBtnBound = true;
+    btn.addEventListener('click', showHuaweiConfigModal);
+  }
+
+  function showHuaweiConfigModal() {
+    const existing = document.getElementById('huawei-config-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'huawei-config-modal';
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'background:rgba(0,0,0,0.65)',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'z-index:9999', 'padding:16px'
+    ].join(';');
+
+    const modal = document.createElement('div');
+    modal.style.cssText = [
+      'background:#1e2130', 'border-radius:12px', 'padding:28px',
+      'width:100%', 'max-width:480px', 'color:#e0e0e0', 'font-family:inherit'
+    ].join(';');
+
+    modal.innerHTML = `
+      <h2 style="margin:0 0 6px;font-size:1.15rem;color:#fff;">Configurar Huawei Cloud</h2>
+      <p style="margin:0 0 20px;font-size:.85rem;color:#9ca3af;">
+        As credenciais são armazenadas apenas em memória e descartadas ao fechar o browser.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:#9ca3af;">
+          Access Key (AK)
+          <input id="hw-ak" type="text" autocomplete="off" placeholder="LTAI5t..."
+            style="padding:8px 12px;border-radius:6px;border:1px solid #4a5568;background:#131929;color:#e0e0e0;font-size:.9rem;" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:#9ca3af;">
+          Secret Key (SK)
+          <input id="hw-sk" type="password" autocomplete="off" placeholder="••••••••"
+            style="padding:8px 12px;border-radius:6px;border:1px solid #4a5568;background:#131929;color:#e0e0e0;font-size:.9rem;" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:#9ca3af;">
+          Project ID
+          <input id="hw-project" type="text" autocomplete="off" placeholder="0a1b2c3d..."
+            style="padding:8px 12px;border-radius:6px;border:1px solid #4a5568;background:#131929;color:#e0e0e0;font-size:.9rem;" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:#9ca3af;">
+          Region
+          <input id="hw-region" type="text" autocomplete="off" value="la-south-2"
+            style="padding:8px 12px;border-radius:6px;border:1px solid #4a5568;background:#131929;color:#e0e0e0;font-size:.9rem;" />
+        </label>
+      </div>
+      <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;">
+        <button id="hw-cancel" style="padding:8px 20px;border-radius:6px;border:1px solid #4a5568;background:transparent;color:#9ca3af;cursor:pointer;font-size:.9rem;">
+          Cancelar
+        </button>
+        <button id="hw-save" style="padding:8px 20px;border-radius:6px;border:none;background:#1a73e8;color:#fff;cursor:pointer;font-size:.9rem;">
+          Salvar e Conectar
+        </button>
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    modal.querySelector('#hw-cancel').addEventListener('click', () => overlay.remove());
+
+    modal.querySelector('#hw-save').addEventListener('click', () => {
+      const accessKey = modal.querySelector('#hw-ak').value.trim();
+      const secretKey = modal.querySelector('#hw-sk').value.trim();
+      const projectId = modal.querySelector('#hw-project').value.trim();
+      const region    = modal.querySelector('#hw-region').value.trim() || 'la-south-2';
+
+      if (!accessKey || !secretKey) {
+        showToast('Access Key e Secret Key são obrigatórios.', 'error');
+        return;
+      }
+
+      HUAWEI_API.configure({ accessKey, secretKey, projectId, region });
+      overlay.remove();
+      showToast('Credenciais Huawei configuradas. Recarregando dados...', 'success');
+      _loadData();
+    });
+  }
+
+  // ── Legacy fallback renderers (kept for backward compatibility) ───────────
+  function _renderOverviewFallback() {
+    const data = DataBus.getData();
+    if (!data) return;
     const s = data.summary;
-    const changeAmt = s.currentMonthCost - s.previousMonthCost;
-    const changePct = ((changeAmt / s.previousMonthCost) * 100).toFixed(1);
+    const changeAmt = (s.currentMonthCost || s.totalCurrentCost || 0) - (s.previousMonthCost || s.totalPreviousCost || 0);
+    const prevCost = s.previousMonthCost || s.totalPreviousCost || 1;
+    const changePct = ((changeAmt / prevCost) * 100).toFixed(1);
     const isUp = changeAmt > 0;
 
     const kpis = [
-      { label: 'Gasto no Período', value: fmt(s.currentMonthCost), change: `${isUp ? '▲' : '▼'} ${Math.abs(changePct)}% vs período anterior`, changeClass: isUp ? 'up' : 'down', sub: `Projeção: ${fmt(s.projectedCost)}`, color: 'blue' },
-      { label: 'Desperdício Identificado', value: fmt(s.totalWaste), change: `${s.wastePercent}% do total`, changeClass: 'up', sub: 'Recursos ociosos e superdimensionados', color: 'red' },
-      { label: 'Economia Potencial', value: fmt(s.potentialSaving), change: `${s.savingPercent}% de redução possível`, changeClass: 'down', sub: 'Com as recomendações aplicadas', color: 'green' },
-      { label: 'Orçamento Total', value: fmt(s.totalBudget), change: `${((s.currentMonthCost / s.totalBudget) * 100).toFixed(1)}% utilizado`, changeClass: s.currentMonthCost / s.totalBudget > 0.9 ? 'up' : 'neutral', sub: `Disponível: ${fmt(s.totalBudget - s.currentMonthCost)}`, color: s.currentMonthCost / s.totalBudget > 0.9 ? 'red' : 'yellow' },
-      { label: 'Projetos Ativos', value: s.activeProjects, change: `${s.activeServices} serviços`, changeClass: 'neutral', sub: 'Monitorados neste período', color: 'purple' }
+      { label: 'Gasto no Período', value: fmt(s.currentMonthCost || s.totalCurrentCost || 0), change: `${isUp ? '▲' : '▼'} ${Math.abs(Number(changePct))}% vs período anterior`, changeClass: isUp ? 'up' : 'down', sub: `Projeção: ${fmt(s.projectedCost || 0)}`, color: 'blue' },
+      { label: 'Desperdício Identificado', value: fmt(s.totalWaste || 0), change: `${s.wastePercent || 0}% do total`, changeClass: 'up', sub: 'Recursos ociosos e superdimensionados', color: 'red' },
+      { label: 'Economia Potencial', value: fmt(s.potentialSaving || 0), change: `${s.savingPercent || 0}% de redução possível`, changeClass: 'down', sub: 'Com as recomendações aplicadas', color: 'green' },
+      { label: 'Projetos Ativos', value: s.activeProjects || 0, change: `${(s.activeProviders || []).join(', ').toUpperCase()}`, changeClass: 'neutral', sub: 'Monitorados neste período', color: 'purple' }
     ];
 
     const grid = document.getElementById('kpi-grid');
-    grid.innerHTML = kpis.map((k, i) => `
-      <div class="kpi-card ${k.color}" style="animation-delay:${i * 0.08}s">
-        <div class="kpi-label">${k.label}</div>
-        <div class="kpi-value">${typeof k.value === 'number' ? k.value : k.value}</div>
-        <div class="kpi-change ${k.changeClass}">${k.change}</div>
-        <div class="kpi-sub">${k.sub}</div>
-      </div>
-    `).join('');
+    if (grid) {
+      grid.innerHTML = kpis.map((k, i) => `
+        <div class="kpi-card ${k.color}" style="animation-delay:${i * 0.08}s">
+          <div class="kpi-label">${k.label}</div>
+          <div class="kpi-value">${k.value}</div>
+          <div class="kpi-change ${k.changeClass}">${k.change}</div>
+          <div class="kpi-sub">${k.sub}</div>
+        </div>
+      `).join('');
+    }
 
-    // Trend badge
-    const badge = document.getElementById('trend-badge');
-    badge.textContent = isUp ? `▲ ${Math.abs(changePct)}% vs anterior` : `▼ ${Math.abs(changePct)}% vs anterior`;
-    badge.className = 'chart-badge' + (isUp ? ' up' : '');
-
-    // Charts
     setTimeout(() => {
-      renderTimeline('chart-timeline', data.timeline);
-      renderServicesDonut('chart-services', data.services);
-      renderTopProjects('chart-top-projects', data.projects);
-      renderRegions('chart-regions', data.regions);
-      renderBudget('chart-budget', data.summary.currentMonthCost, data.summary.totalBudget);
+      if (typeof renderTimeline === 'function') renderTimeline('chart-timeline', data.timeline);
+      if (typeof renderServicesDonut === 'function') renderServicesDonut('chart-services', data.services);
+      if (typeof renderTopProjects === 'function') renderTopProjects('chart-top-projects', data.projects);
+      if (typeof renderRegions === 'function') renderRegions('chart-regions', data.regions);
+      if (typeof renderBudget === 'function') renderBudget('chart-budget', s.currentMonthCost || s.totalCurrentCost || 0, s.totalBudget || 0);
     }, 100);
   }
 
-  // ── PROJECTS ──────────────────────────────────────────────────────────────
-  function renderProjects(filter = '') {
-    let projects = [...data.projects];
-    if (filter) projects = projects.filter(p => p.name.toLowerCase().includes(filter.toLowerCase()) || p.id.toLowerCase().includes(filter.toLowerCase()));
-
-    const sort = document.getElementById('project-sort')?.value || 'cost-desc';
-    if (sort === 'cost-desc') projects.sort((a, b) => b.currentCost - a.currentCost);
-    else if (sort === 'cost-asc') projects.sort((a, b) => a.currentCost - b.currentCost);
-    else if (sort === 'growth-desc') projects.sort((a, b) => parseFloat(b.change) - parseFloat(a.change));
-    else projects.sort((a, b) => a.name.localeCompare(b.name));
-
-    const maxCost = Math.max(...projects.map(p => p.currentCost));
-
+  function _renderProjectsFallback() {
+    const data = DataBus.getData();
+    if (!data) return;
     const grid = document.getElementById('projects-grid');
+    if (!grid) return;
+    const projects = [...(data.projects || [])].sort((a, b) => b.currentCost - a.currentCost);
     grid.innerHTML = projects.map((p, i) => {
       const isUp = parseFloat(p.change) > 0;
-      const pct = (p.currentCost / maxCost * 100).toFixed(1);
-    const budgetPct = Math.round((p.currentCost / p.budget) * 100);
+      const budget = p.budget || 1;
+      const budgetPct = Math.round((p.currentCost / budget) * 100);
       const badgeClass = budgetPct > 90 ? 'badge-high' : budgetPct > 70 ? 'badge-medium' : 'badge-low';
       const badgeText = budgetPct > 90 ? 'Crítico' : budgetPct > 70 ? 'Atenção' : 'Normal';
       const barColor = budgetPct > 90 ? '#ff4d6a' : budgetPct > 70 ? '#ffb800' : '#1a73e8';
       const topServices = (p.services || []).slice(0, 3);
-
       return `
         <div class="project-card" style="animation-delay:${i * 0.06}s">
           <div class="project-header">
             <div>
               <div class="project-name">${p.name}</div>
-              <div class="project-id">${p.id}</div>
+              <div class="project-id">${p.id} <span class="provider-badge">${(p.provider || 'gcp').toUpperCase()}</span></div>
             </div>
             <span class="project-badge ${badgeClass}">${badgeText}</span>
           </div>
           <div class="project-cost">${fmt(p.currentCost)}</div>
-          <div class="project-change ${isUp ? 'up' : 'down'}">${isUp ? '▲' : '▼'} ${Math.abs(p.change)}% vs período anterior</div>
+          <div class="project-change ${isUp ? 'up' : 'down'}">${isUp ? '▲' : '▼'} ${Math.abs(parseFloat(p.change) || 0)}% vs período anterior</div>
           <div class="project-bar-wrap">
-            <div class="project-bar-label">
-              <span>Orçamento utilizado</span>
-              <span>${budgetPct}% de ${fmt(p.budget)}</span>
-            </div>
-            <div class="project-bar">
-              <div class="project-bar-fill" style="width:${Math.min(budgetPct, 100)}%; background:${barColor}"></div>
-            </div>
+            <div class="project-bar-label"><span>Orçamento utilizado</span><span>${budgetPct}% de ${fmt(budget)}</span></div>
+            <div class="project-bar"><div class="project-bar-fill" style="width:${Math.min(budgetPct, 100)}%;background:${barColor}"></div></div>
           </div>
-          <div class="project-services">
-            ${topServices.map(s => `<span class="service-tag">${s.name}</span>`).join('')}
-          </div>
+          <div class="project-services">${topServices.map(s => `<span class="service-tag">${s.name}</span>`).join('')}</div>
         </div>
       `;
     }).join('');
-
-    // Search & sort bindings
-    const searchInput = document.getElementById('project-search');
-    const sortSelect = document.getElementById('project-sort');
-    if (searchInput && !searchInput._bound) {
-      searchInput._bound = true;
-      searchInput.addEventListener('input', e => renderProjects(e.target.value));
-    }
-    if (sortSelect && !sortSelect._bound) {
-      sortSelect._bound = true;
-      sortSelect.addEventListener('change', () => renderProjects(searchInput?.value || ''));
-    }
-
-    setTimeout(() => renderProjectsCompare('chart-projects-compare', projects), 100);
+    setTimeout(() => {
+      if (typeof renderProjectsCompare === 'function') renderProjectsCompare('chart-projects-compare', projects);
+    }, 100);
   }
 
-  // ── WASTE ─────────────────────────────────────────────────────────────────
-  function renderWaste() {
+  function _renderWasteFallback() {
+    const data = DataBus.getData();
+    if (!data) return;
     const s = data.summary;
-    const totalWaste = data.waste.reduce((sum, w) => sum + w.totalWaste, 0);
-    const categories = data.waste.length;
-    const items = data.waste.reduce((sum, w) => sum + w.items.length, 0);
-
-    document.getElementById('waste-summary').innerHTML = `
-      <div class="waste-summary-card" style="animation-delay:0s">
-        <div class="icon">🔥</div>
-        <div class="label">Total Desperdiçado</div>
-        <div class="value red">${fmt(totalWaste)}</div>
-      </div>
-      <div class="waste-summary-card" style="animation-delay:0.1s">
-        <div class="icon">📊</div>
-        <div class="label">% do Orçamento</div>
-        <div class="value yellow">${s.wastePercent}%</div>
-      </div>
-      <div class="waste-summary-card" style="animation-delay:0.2s">
-        <div class="icon">🗂️</div>
-        <div class="label">Categorias</div>
-        <div class="value">${categories}</div>
-      </div>
-      <div class="waste-summary-card" style="animation-delay:0.3s">
-        <div class="icon">📋</div>
-        <div class="label">Recursos Ociosos</div>
-        <div class="value red">${items}</div>
-      </div>
-      <div class="waste-summary-card" style="animation-delay:0.4s">
-        <div class="icon">💰</div>
-        <div class="label">Economia Anual Projetada</div>
-        <div class="value green">${fmt(totalWaste * 12)}</div>
-      </div>
-    `;
-
-    document.getElementById('waste-grid').innerHTML = data.waste.map((w, i) => `
-      <div class="waste-card" style="animation-delay:${i * 0.08}s">
-        <div class="waste-card-header">
-          <div class="waste-icon ${w.color}">${w.icon}</div>
-          <div>
-            <div class="waste-title">${w.category}</div>
-            <div class="waste-subtitle">${w.items.length} recursos · ${fmt(w.totalWaste)}/mês</div>
+    const totalWaste = (data.waste || []).reduce((sum, w) => sum + (w.totalWaste || 0), 0);
+    const summaryEl = document.getElementById('waste-summary');
+    if (summaryEl) {
+      summaryEl.innerHTML = `
+        <div class="waste-summary-card"><div class="icon">🔥</div><div class="label">Total Desperdiçado</div><div class="value red">${fmt(totalWaste)}</div></div>
+        <div class="waste-summary-card"><div class="icon">📊</div><div class="label">% do Orçamento</div><div class="value yellow">${s.wastePercent || 0}%</div></div>
+      `;
+    }
+    const grid = document.getElementById('waste-grid');
+    if (grid) {
+      grid.innerHTML = (data.waste || []).map((w, i) => `
+        <div class="waste-card" style="animation-delay:${i * 0.08}s">
+          <div class="waste-card-header">
+            <div class="waste-icon ${w.color || ''}">${w.icon || '⚠️'}</div>
+            <div><div class="waste-title">${w.category}</div><div class="waste-subtitle">${(w.items || []).length} recursos · ${fmt(w.totalWaste || 0)}/mês</div></div>
           </div>
         </div>
-        <div class="waste-items">
-          ${w.items.map(item => `
-            <div class="waste-item">
-              <div class="waste-item-name" title="${item.reason}">${item.name}</div>
-              <div class="waste-item-cost">${fmt(item.cost)}</div>
-              <button class="waste-item-action" onclick="App.showToast('Ação: ${item.action} — ${item.name}', 'info')">${item.action}</button>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `).join('');
-
-    setTimeout(() => renderWasteCategories('chart-waste-categories', data.waste), 100);
+      `).join('');
+    }
+    setTimeout(() => {
+      if (typeof renderWasteCategories === 'function') renderWasteCategories('chart-waste-categories', data.waste);
+    }, 100);
   }
 
-  // ── RECOMMENDATIONS ───────────────────────────────────────────────────────
-  function renderRecommendations(filter = 'all') {
-    recFilter = filter;
-    const filters = [
-      { id: 'all', label: 'Todas' },
-      { id: 'critical', label: '🔴 Crítico' },
-      { id: 'high', label: '🟠 Alto' },
-      { id: 'medium', label: '🟡 Médio' },
-      { id: 'low', label: '🟢 Baixo' },
-      { id: 'compute', label: 'Compute' },
-      { id: 'storage', label: 'Storage' },
-      { id: 'network', label: 'Network' },
-      { id: 'database', label: 'Database' }
-    ];
-
-    document.getElementById('rec-filters').innerHTML = filters.map(f => `
-      <button class="rec-filter-btn ${recFilter === f.id ? 'active' : ''}" onclick="App.filterRec('${f.id}')">${f.label}</button>
-    `).join('');
-
-    let recs = data.recommendations;
-    if (filter !== 'all') {
-      recs = recs.filter(r => r.priority === filter || r.category === filter);
-    }
-
-    const catClass = { compute: 'cat-compute', storage: 'cat-storage', network: 'cat-network', database: 'cat-database', other: 'cat-other' };
-    const catLabel = { compute: 'Compute', storage: 'Storage', network: 'Network', database: 'Database', other: 'Outros' };
-
-    document.getElementById('rec-list').innerHTML = recs.map((r, i) => `
+  function _renderRecommendationsFallback() {
+    const data = DataBus.getData();
+    if (!data) return;
+    const list = document.getElementById('rec-list');
+    if (!list) return;
+    list.innerHTML = (data.recommendations || []).map((r, i) => `
       <div class="rec-card" style="animation-delay:${i * 0.06}s">
         <div class="rec-priority ${r.priority}"></div>
         <div class="rec-content">
           <div class="rec-title">${r.title}</div>
-          <div class="rec-desc">${r.description}</div>
-          <div class="rec-meta">
-            <div class="rec-meta-item">
-              <span class="rec-meta-label">Economia Mensal</span>
-              <span class="rec-meta-value green">${fmt(r.saving)}</span>
-            </div>
-            <div class="rec-meta-item">
-              <span class="rec-meta-label">Economia Anual</span>
-              <span class="rec-meta-value green">${fmt(r.saving * 12)}</span>
-            </div>
-            <div class="rec-meta-item">
-              <span class="rec-meta-label">Esforço</span>
-              <span class="rec-meta-value">${r.effort}</span>
-            </div>
-            <div class="rec-meta-item">
-              <span class="rec-meta-label">Impacto</span>
-              <span class="rec-meta-value ${r.impact === 'Alto' ? 'green' : ''}">${r.impact}</span>
-            </div>
-            <div class="rec-meta-item">
-              <span class="rec-meta-label">Implementação</span>
-              <span class="rec-meta-value">${r.timeToImplement}</span>
-            </div>
-          </div>
-        </div>
-        <div class="rec-actions">
-          <span class="rec-category ${catClass[r.category]}">${catLabel[r.category]}</span>
-          <button class="btn-apply" onclick="App.applyRec(${r.id})">Aplicar</button>
+          <div class="rec-desc">${r.description || ''}</div>
         </div>
       </div>
     `).join('');
   }
 
-  // ── TRENDS ────────────────────────────────────────────────────────────────
-  function renderTrends() {
+  function _renderTrendsFallback() {
+    const data = DataBus.getData();
+    if (!data) return;
     setTimeout(() => {
-      renderForecast('chart-forecast', data.timeline);
-      renderMoM('chart-mom', data.services);
-      renderHeatmap('chart-heatmap');
+      if (typeof renderForecast === 'function') renderForecast('chart-forecast', data.timeline);
+      if (typeof renderMoM === 'function') renderMoM('chart-mom', data.services);
+      if (typeof renderHeatmap === 'function') renderHeatmap('chart-heatmap');
     }, 100);
   }
 
   // ── Public helpers ────────────────────────────────────────────────────────
-  function filterRec(f) { renderRecommendations(f); }
+  function filterRec(f) {
+    if (typeof RecommendationsPage !== 'undefined') RecommendationsPage.render(f);
+    else _renderRecommendationsFallback();
+  }
 
   function applyRec(id) {
-    const rec = data.recommendations.find(r => r.id === id);
+    const data = DataBus.getData();
+    if (!data) return;
+    const rec = (data.recommendations || []).find(r => r.id === id);
     if (rec) showToast(`Recomendação "${rec.title}" marcada para implementação`, 'success');
   }
 
@@ -460,18 +523,18 @@ const App = (() => {
   }
 
   function fmt(val) {
-    if (typeof val !== 'number') return val;
-    if (val >= 1e6) return `R$ ${(val/1e6).toFixed(2)}M`;
-    if (val >= 1e3) return `R$ ${(val/1e3).toFixed(1)}K`;
+    if (typeof val !== 'number') return String(val || 0);
+    if (val >= 1e6) return `R$ ${(val / 1e6).toFixed(2)}M`;
+    if (val >= 1e3) return `R$ ${(val / 1e3).toFixed(1)}K`;
     return `R$ ${val.toFixed(0)}`;
   }
 
-  // Inicia assim que o script carrega (scripts estão no final do body)
+  // Bootstrap
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
 
-  return { filterRec, applyRec, showToast };
+  return { filterRec, applyRec, showToast, navigateTo, showHuaweiConfigModal };
 })();

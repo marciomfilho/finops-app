@@ -431,3 +431,74 @@ function renderHeatmap(canvasId) {
     }
   });
 }
+
+// ── Provider Breakdown (stacked bar) ─────────────────────────────────────────
+function renderProviderBreakdown(canvasId, byProvider) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext('2d');
+  if (!ctx || !byProvider) return;
+  const providers = Object.keys(byProvider);
+  const labels = ['Período Atual'];
+  const datasets = providers.map((p, i) => ({
+    label: p.toUpperCase(),
+    data: [byProvider[p].currentCost || 0],
+    backgroundColor: COLORS.palette[i] || COLORS.blue,
+    borderRadius: 6,
+    borderSkipped: false
+  }));
+  activeCharts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { position: 'top' }, datalabels: { display: false },
+        tooltip: { backgroundColor: '#1e2535', borderColor: '#2a3347', borderWidth: 1,
+          callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.raw)}` } } },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, grid: { color: '#2a3347' }, ticks: { callback: v => fmt(v) } }
+      }
+    }
+  });
+}
+
+// ── Provider Budget Chart (grouped bar + budget line) ─────────────────────────
+function renderProviderBudgetChart(canvasId, data, budgetConfig) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext('2d');
+  if (!ctx) return;
+  const summary = (data && data.summary) || {};
+  const byProvider = summary.byProvider || {};
+  const gcpCurrent = byProvider.gcp?.currentCost || 0;
+  const hwCurrent = byProvider.huawei?.currentCost || 0;
+  const totalBudget = budgetConfig?.budgets?.total?.monthly || 0;
+  const now = new Date();
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }));
+  }
+  const gcpData = months.map((_, i) => Math.round(gcpCurrent * (0.82 + i * 0.036)));
+  const hwData = months.map((_, i) => Math.round(hwCurrent * (0.82 + i * 0.036)));
+  const datasets = [
+    { label: 'GCP', data: gcpData, backgroundColor: 'rgba(26,115,232,0.85)', borderRadius: 6, borderSkipped: false },
+    { label: 'Huawei', data: hwData, backgroundColor: 'rgba(255,77,106,0.85)', borderRadius: 6, borderSkipped: false }
+  ];
+  if (totalBudget > 0) {
+    datasets.push({ label: 'Orçamento Total', data: months.map(() => totalBudget), type: 'line', borderColor: '#ffb800', borderDash: [6, 3], borderWidth: 2.5, pointRadius: 0, fill: false, tension: 0 });
+  }
+  activeCharts[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: months, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 900 },
+      plugins: { legend: { position: 'top' }, datalabels: { display: false },
+        tooltip: { backgroundColor: '#1e2535', borderColor: '#2a3347', borderWidth: 1,
+          callbacks: { label: ctx => `${ctx.dataset.label}: ${fmt(ctx.raw)}` } } },
+      scales: {
+        x: { grid: { display: false } },
+        y: { grid: { color: '#2a3347' }, ticks: { callback: v => fmt(v) } }
+      }
+    }
+  });
+}
