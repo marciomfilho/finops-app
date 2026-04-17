@@ -1,0 +1,30 @@
+{
+  "name": "finops-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "FinOps Dashboard V2 — Backend Proxy + Supabase (EXA)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --import ./src/loadEnv.js src/server.js",
+    "dev": "node --watch --import ./src/loadEnv.js src/server.js",
+    "sync": "node --import ./src/loadEnv.js sync/index.js",
+    "migrate": "node migrations/run_migration.mjs",
+    "test": "node --experimental-vm-modules node_modules/.bin/vitest --run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@google-cloud/secret-manager": "^5.6.0",
+    "@supabase/supabase-js": "^2.103.3",
+    "cors": "^2.8.6",
+    "express": "^4.22.1",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^7.2.0",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "fast-check": "^4.6.0",
+    "supertest": "^6.3.4",
+    "vitest": "^2.1.4"
+  }
+}

@@ -41,3 +41,8 @@ window.HUAWEI_REGION = 'la-south-2';
 // ── Google Gemini AI ─────────────────────────────────────────────────────────
 // Chave da API Gemini — obtenha em https://aistudio.google.com/app/apikey
 window.GEMINI_API_KEY = '';
+
+// ── Backend Proxy ─────────────────────────────────────────────────────────────
+// URL do backend proxy (Cloud Run). Deixe vazio para usar apenas dados demo/diretos.
+// Exemplo: 'https://finops-backend-XXXX-uc.a.run.app'
+window.BACKEND_URL = '';

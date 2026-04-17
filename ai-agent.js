@@ -133,13 +133,61 @@ Sempre quantifique o impacto financeiro das recomendações. Seja conciso e prá
 
   /**
    * Chat interativo com o agente FinOps.
-   * Suporta streaming via onChunk callback.
+   * Se o BackendProvider tiver JWT, envia a mensagem ao endpoint RAG do backend.
+   * Caso contrário, faz fallback para a Gemini API direta.
+   * Suporta streaming via onChunk callback (apenas no fallback direto).
    * @param {string} message - Mensagem do usuário
    * @param {Array} history - Histórico de mensagens
    * @param {Function|null} onChunk - Callback para streaming (opcional)
    * @returns {Promise<string|void>}
    */
   async function chat(message, history, onChunk) {
+    // ── Backend RAG path ──────────────────────────────────────────────────────
+    const backendAvailable =
+      typeof BackendProvider !== 'undefined' &&
+      BackendProvider.hasJWT() &&
+      typeof window !== 'undefined' &&
+      window.BACKEND_URL;
+
+    if (backendAvailable) {
+      const jwt = BackendProvider.getJWT ? BackendProvider.getJWT() : null;
+      const url = `${window.BACKEND_URL}/api/chat`;
+
+      let res;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${jwt || ''}`
+          },
+          body: JSON.stringify({ message, history: history.slice(-6) })
+        });
+      } catch (_networkErr) {
+        // Network failure — fall through to direct Gemini path
+        res = null;
+      }
+
+      if (res !== null) {
+        if (res.status === 401) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('auth:expired'));
+          }
+          throw new Error('AUTH_EXPIRED');
+        }
+
+        if (res.ok) {
+          const json = await res.json();
+          const text = json.text || '';
+          if (onChunk) onChunk(text);
+          return text;
+        }
+
+        // Non-401 error from backend — fall through to direct Gemini path
+      }
+    }
+
+    // ── Direct Gemini fallback ────────────────────────────────────────────────
     if (aiDisabled || !GeminiClient.hasApiKey()) throw new Error('GEMINI_NO_KEY');
     if (GeminiClient.isThrottled()) throw new Error('GEMINI_QUOTA_EXCEEDED');
 

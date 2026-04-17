@@ -30,7 +30,36 @@ const App = (() => {
       if (activePage) renderPage(activePage.dataset.page);
     });
 
-    // Handle OAuth2 redirect callback
+    // Listen for JWT expiry — clear session and show login screen
+    window.addEventListener('auth:expired', () => {
+      BackendProvider.clearJWT();
+      _showLoginScreen();
+      showToast('Sessão expirada. Faça login novamente.', 'error');
+    });
+
+    // If ?jwt= is in URL, handle backend auth callback first
+    const _initParams = new URLSearchParams(window.location.search);
+    if (_initParams.has('jwt')) {
+      handleAuthCallback();
+      return;
+    }
+
+    // If ?error= is in URL, show the error from the backend auth flow
+    if (_initParams.has('error')) {
+      const authError = _initParams.get('error');
+      history.replaceState(null, '', window.location.pathname + window.location.hash);
+      bindLoginEvents();
+      showToast(authError, 'error');
+      return;
+    }
+
+    // If BACKEND_URL is configured but no JWT yet, show login screen for Google SSO
+    if (window.BACKEND_URL && !BackendProvider.hasJWT()) {
+      bindLoginEvents();
+      return;
+    }
+
+    // Handle legacy GCP OAuth2 redirect callback
     if (GCP_API.handleRedirectCallback()) {
       showLoading();
       _loadData();
@@ -44,9 +73,78 @@ const App = (() => {
     bindCSVImportButton();
   }
 
+  // ── Backend Auth Callback ─────────────────────────────────────────────────
+  /**
+   * Handles the redirect back from the backend after Google SSO.
+   * Captures ?jwt=<token> from URL, stores it in BackendProvider,
+   * removes the token from the URL, then loads data.
+   * Requirement 9.3, 9.4
+   */
+  function handleAuthCallback() {
+    const params = new URLSearchParams(window.location.search);
+    const jwt = params.get('jwt');
+
+    if (!jwt) {
+      showToast('Falha na autenticação: token ausente.', 'error');
+      bindLoginEvents();
+      return;
+    }
+
+    // Store JWT in memory only — never in localStorage (Requirement 9.4)
+    BackendProvider.setJWT(jwt);
+
+    // Remove JWT from URL to avoid leaking it in browser history (Requirement 9.3)
+    params.delete('jwt');
+    const newSearch = params.toString();
+    const newUrl = window.location.pathname + (newSearch ? '?' + newSearch : '') + window.location.hash;
+    history.replaceState(null, '', newUrl);
+
+    // Proceed to load data
+    bindNavEvents();
+    bindTopbarEvents();
+    bindHuaweiConfigButton();
+    bindCSVImportButton();
+    _loadData();
+  }
+
+  // ── Google Login via Backend ──────────────────────────────────────────────
+  /**
+   * Redirects to the backend Google OAuth2 flow.
+   * Requirement 9.2
+   */
+  function handleGoogleLogin() {
+    if (!window.BACKEND_URL) {
+      showToast('BACKEND_URL não configurado.', 'error');
+      return;
+    }
+    window.location.href = `${window.BACKEND_URL}/auth/google`;
+  }
+
+  // ── Logout ────────────────────────────────────────────────────────────────
+  /**
+   * Clears the JWT and shows the login screen.
+   * Requirement 9.5
+   */
+  function handleLogout() {
+    BackendProvider.clearJWT();
+    _showLoginScreen();
+    showToast('Sessão encerrada', 'info');
+  }
+
+  function _showLoginScreen() {
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login-screen').classList.remove('hidden');
+  }
+
   // ── Login ─────────────────────────────────────────────────────────────────
   function bindLoginEvents() {
     document.getElementById('btn-google-login').addEventListener('click', () => {
+      // If BACKEND_URL is configured, use backend Google SSO flow (Requirement 9.2, 8.7)
+      if (window.BACKEND_URL) {
+        handleGoogleLogin();
+        return;
+      }
+      // Fallback: legacy GCP client-side OAuth2
       if (!GCP_API.hasClientId) {
         showToast('Configure o CLIENT_ID em config.js para usar autenticação real.', 'error');
         return;
@@ -61,10 +159,9 @@ const App = (() => {
     });
 
     document.getElementById('btn-logout').addEventListener('click', () => {
-      GCP_API.signOut();
-      document.getElementById('app').classList.add('hidden');
-      document.getElementById('login-screen').classList.remove('hidden');
-      showToast('Sessão encerrada', 'info');
+      handleLogout();
+      // Also sign out of legacy GCP session if active
+      if (!window.BACKEND_URL) GCP_API.signOut();
     });
   }
 
@@ -536,5 +633,5 @@ const App = (() => {
     init();
   }
 
-  return { filterRec, applyRec, showToast, navigateTo, showHuaweiConfigModal };
+  return { filterRec, applyRec, showToast, navigateTo, showHuaweiConfigModal, handleGoogleLogin, handleAuthCallback, handleLogout };
 })();

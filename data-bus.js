@@ -63,8 +63,13 @@ const DataBus = (() => {
   async function load(period = 30) {
     const configuredProviders = providers.filter(p => p.isConfigured());
 
+    // If a priority provider (id: 'backend') is configured, use it exclusively
+    // to avoid double-counting data that the backend already aggregates.
+    const backendProvider = configuredProviders.find(p => p.id === 'backend');
+    const activeProviders = backendProvider ? [backendProvider] : configuredProviders;
+
     const results = await Promise.allSettled(
-      configuredProviders.map(p => p.fetchData(period))
+      activeProviders.map(p => p.fetchData(period))
     );
 
     const successfulData = results
@@ -341,3 +346,103 @@ const DataBus = (() => {
     injectCSVData
   };
 })();
+
+
+// ── BackendProvider ─────────────────────────────────────────────────────────
+
+/**
+ * BackendProvider — fetches billing data from the backend proxy.
+ * JWT is stored only in memory (never in localStorage or cookies).
+ * Implements the DataBus provider interface: { id, isConfigured(), fetchData(period) }
+ */
+const BackendProvider = (() => {
+  let _jwt = null;
+
+  const BACKEND_URL = (() => {
+    if (typeof window !== 'undefined' && window.BACKEND_URL) return window.BACKEND_URL;
+    return '';
+  })();
+
+  // ── JWT management ──────────────────────────────────────────────────────────
+
+  function setJWT(token) {
+    _jwt = token;
+  }
+
+  function clearJWT() {
+    _jwt = null;
+  }
+
+  function hasJWT() {
+    return _jwt !== null && _jwt !== undefined && _jwt !== '';
+  }
+
+  function isConfigured() {
+    return hasJWT() && BACKEND_URL !== '';
+  }
+
+  // ── Internal fetch helper ───────────────────────────────────────────────────
+
+  async function _apiFetch(url) {
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${_jwt}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (res.status === 401) {
+      clearJWT();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth:expired'));
+      }
+      throw new Error('[BackendProvider] JWT expired — auth:expired dispatched');
+    }
+
+    if (!res.ok) {
+      throw new Error(`[BackendProvider] HTTP ${res.status} from ${url}`);
+    }
+
+    return res.json();
+  }
+
+  // ── Data fetching ───────────────────────────────────────────────────────────
+
+  /**
+   * Fetches billing data for all providers from the backend.
+   * Maps to GET /api/billing/all?period=<period>
+   * @param {number} period - Number of days
+   * @returns {Promise<Object>} ProviderData compatible with DataBus
+   */
+  async function fetchData(period = 30) {
+    const url = `${BACKEND_URL}/api/billing/all?period=${period}`;
+    return _apiFetch(url);
+  }
+
+  /**
+   * Fetches cost summaries from the backend.
+   * Maps to GET /api/summaries?period=<period>
+   * @param {number} period - Number of days
+   * @returns {Promise<Object>} UnifiedSummary
+   */
+  async function fetchSummaries(period = 30) {
+    const url = `${BACKEND_URL}/api/summaries?period=${period}`;
+    return _apiFetch(url);
+  }
+
+  return {
+    id: 'backend',
+    setJWT,
+    clearJWT,
+    hasJWT,
+    getJWT: () => _jwt,
+    isConfigured,
+    fetchData,
+    fetchSummaries
+  };
+})();
+
+// Register BackendProvider in DataBus with priority over GCP/Huawei direct providers.
+// DataBus.load() will use BackendProvider exclusively when it is configured (JWT present),
+// falling back to direct GCP/Huawei providers when BackendProvider is not configured.
+DataBus.registerProvider(BackendProvider);
