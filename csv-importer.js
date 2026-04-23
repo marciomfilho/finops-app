@@ -192,6 +192,111 @@ const CSVImporter = (() => {
     });
   }
 
+  // ── Cloud8 CSV parser ───────────────────────────────────────────────────────
+
+  /**
+   * Detects if a CSV is in the Cloud8 format (GCP billing export from Cloud8 tool).
+   * Cloud8 CSVs have unnamed first two columns and cost/estimate columns with "Custo:" / "Estimativa:" headers.
+   * @param {string[]} headers
+   * @returns {boolean}
+   */
+  function isCloud8Format(headers) {
+    return headers.some(h => /^Custo:/i.test(h.trim())) &&
+           headers.some(h => /^Estimativa:/i.test(h.trim()));
+  }
+
+  /**
+   * Parses a pt-BR formatted number string (e.g. "583791,76") to float.
+   * @param {string} value
+   * @returns {number}
+   */
+  function parsePtBRNumber(value) {
+    if (!value || value.trim() === '') return 0;
+    // Remove thousand separators (dots) and replace decimal comma with dot
+    return parseFloat(value.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+
+  /**
+   * Extracts month/year label from a Cloud8 column header like "Custo: Marco/2026".
+   * @param {string[]} headers
+   * @param {string} prefix - 'Custo' | 'Estimativa'
+   * @returns {{ header: string, period: string }[]}
+   */
+  function findCloud8Columns(headers, prefix) {
+    return headers
+      .filter(h => new RegExp(`^${prefix}:`, 'i').test(h.trim()))
+      .map(h => ({ header: h, period: h.replace(new RegExp(`^${prefix}:\\s*`, 'i'), '').trim() }));
+  }
+
+  /**
+   * Parses a Cloud8 GCP billing CSV into normalized project records.
+   * Skips the summary row (where column 2 is empty or equals column 1).
+   * Extracts organization name as a tag.
+   * @param {string[]} headers
+   * @param {Object[]} rows
+   * @returns {Object[]} Normalized project array
+   */
+  function parseCloud8Rows(headers, rows) {
+    const orgCol    = headers[0]; // "GCP - Organizacao"
+    const nameCol   = headers[1]; // project name
+
+    const costCols     = findCloud8Columns(headers, 'Custo');
+    const estimateCols = findCloud8Columns(headers, 'Estimativa');
+
+    // Sort cost columns to identify current vs previous by period order
+    // Assumes the most recent period is current month
+    const [currentCostCol, previousCostCol] = costCols.length >= 2
+      ? [costCols[0], costCols[1]]   // first = current month, second = previous
+      : [costCols[0], null];
+
+    const currentEstimateCol = estimateCols[0] || null;
+
+    return rows
+      .filter(row => {
+        const name = (row[nameCol] || '').trim();
+        const org  = (row[orgCol]  || '').trim();
+        // Skip summary rows (project name empty or same as org)
+        return name && name !== org;
+      })
+      .map(row => {
+        const name         = row[nameCol].trim();
+        const organization = row[orgCol]  ? row[orgCol].trim() : '';
+        const currentCost  = currentCostCol  ? parsePtBRNumber(row[currentCostCol.header])  : 0;
+        const previousCost = previousCostCol ? parsePtBRNumber(row[previousCostCol.header]) : 0;
+        const estimated    = currentEstimateCol ? parsePtBRNumber(row[currentEstimateCol.header]) : 0;
+
+        const change = previousCost > 0
+          ? (((currentCost - previousCost) / previousCost) * 100).toFixed(1)
+          : '0.0';
+
+        // Derive environment tag from project name suffix
+        const envMatch = name.match(/-(homol|hml|dev|prod|prd|non-prd|sandbox|treinamento)$/i);
+        const environment = envMatch
+          ? envMatch[1].toLowerCase().replace('hml', 'homol').replace('prd', 'prod').replace('non-prd', 'homol')
+          : 'prod';
+
+        return {
+          id:           name,
+          name,
+          provider:     'gcp',
+          currentCost,
+          previousCost,
+          cost:         currentCost,
+          change,
+          services:     [],
+          timeSeries:   [],
+          tags: {
+            organization,
+            environment,
+            source:      'cloud8',
+            ...(currentEstimateCol ? { estimated_cost: estimated, estimated_period: currentEstimateCol.period } : {}),
+            ...(currentCostCol     ? { current_period:  currentCostCol.period  } : {}),
+            ...(previousCostCol    ? { previous_period: previousCostCol.period } : {})
+          }
+        };
+      });
+  }
+
   // ── Main parse ──────────────────────────────────────────────────────────────
 
   /**
@@ -208,6 +313,22 @@ const CSVImporter = (() => {
     const { headers, rows } = parseRows(text, delimiter);
 
     if (rows.length === 0) throw new Error('CSV_EMPTY_FILE');
+
+    // Auto-detect Cloud8 format and parse as projects regardless of selected category
+    if (isCloud8Format(headers)) {
+      const data = parseCloud8Rows(headers, rows);
+      return {
+        data,
+        errors: [],
+        preview: rows.slice(0, 5),
+        rowCount: data.length,
+        detectedEncoding: encoding,
+        mapping: {},
+        missingFields: [],
+        headers,
+        detectedFormat: 'cloud8'
+      };
+    }
 
     const mapping = detectSchema(headers, category);
     const requiredFields = REQUIRED_FIELDS[category] || [];
@@ -360,6 +481,9 @@ const CSVImporter = (() => {
 
       try {
         parseResult = await parse(file, category);
+        if (parseResult.detectedFormat === 'cloud8') {
+          category = 'projects'; // Cloud8 always maps to projects
+        }
         renderPreview(parseResult);
       } catch (err) {
         statusArea.innerHTML = `<p style="color:#f87171;">Erro: ${err.message}</p>`;
@@ -368,6 +492,20 @@ const CSVImporter = (() => {
 
     function renderPreview(result) {
       statusArea.innerHTML = '';
+
+      // Cloud8 format badge
+      if (result.detectedFormat === 'cloud8') {
+        const badge = document.createElement('div');
+        badge.style.cssText = [
+          'background:#1a3a2a', 'border:1px solid #2d6a4f', 'border-radius:6px',
+          'padding:10px 14px', 'margin-bottom:12px', 'font-size:.85rem', 'color:#52b788'
+        ].join(';');
+        badge.innerHTML = `
+          <strong>✓ Formato Cloud8 detectado</strong> — ${result.rowCount} projeto(s) importado(s) como <em>Projetos GCP</em>.
+          Tags extraídas: <code>organization</code>, <code>environment</code>, <code>source</code>, <code>estimated_cost</code>.
+        `;
+        statusArea.appendChild(badge);
+      }
 
       // Info row
       const info = document.createElement('p');
@@ -479,7 +617,36 @@ const CSVImporter = (() => {
     btnConfirm.addEventListener('click', () => {
       if (!parseResult) return;
       if (typeof DataBus !== 'undefined') {
-        DataBus.injectCSVData(category, parseResult.data);
+        DataBus.injectCSVData(category, parseResult.data, parseResult.detectedFormat);
+
+        // Show reconciliation summary if Cloud8
+        if (parseResult.detectedFormat === 'cloud8') {
+          // Give DataBus a tick to process, then read result
+          setTimeout(() => {
+            const rec = DataBus.getReconciliation();
+            if (rec) {
+              const msg = [
+                `✓ Reconciliação concluída:`,
+                `  • ${rec.matched} projeto(s) com match — tags aplicadas`,
+                `  • ${rec.providerOnly} projeto(s) só no report GCP/Huawei`,
+                `  • ${rec.cloud8Only} projeto(s) só no Cloud8`
+              ].join('\n');
+              console.info('[Cloud8]', msg);
+              // Surface in modal status area if still open
+              const area = document.getElementById('csv-status-area');
+              if (area) {
+                const recDiv = document.createElement('div');
+                recDiv.style.cssText = [
+                  'background:#1a2f3a', 'border:1px solid #2d6a8f', 'border-radius:6px',
+                  'padding:10px 14px', 'margin-top:10px', 'font-size:.82rem', 'color:#7ec8e3',
+                  'white-space:pre'
+                ].join(';');
+                recDiv.textContent = msg;
+                area.appendChild(recDiv);
+              }
+            }
+          }, 100);
+        }
       }
       overlay.remove();
     });
@@ -491,6 +658,8 @@ const CSVImporter = (() => {
     parseRows,
     detectSchema,
     mapToNormalizedFormat,
+    isCloud8Format,
+    parseCloud8Rows,
     parse,
     showImportModal
   };

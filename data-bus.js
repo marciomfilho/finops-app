@@ -290,15 +290,101 @@ const DataBus = (() => {
    * Injects CSV-imported data for a given category, merges with cache, and fires callbacks.
    * @param {string} category - 'projects' | 'waste' | 'recommendations' | 'costs'
    * @param {Array} normalizedData - Normalized data array from CSVImporter
+   * @param {string} [detectedFormat] - 'cloud8' or undefined
    */
-  function injectCSVData(category, normalizedData) {
+  function injectCSVData(category, normalizedData, detectedFormat) {
     csvOverrides[category] = normalizedData;
+    if (detectedFormat) csvOverrides[`${category}_format`] = detectedFormat;
 
     if (cache) {
       cache = _applyCSVOverrides(cache);
-      lastFetch = Date.now(); // refresh TTL
+      lastFetch = Date.now();
       _fireCallbacks(cache);
     }
+  }
+
+  /**
+   * Normalizes a project name for matching: lowercase, strip "GCP - " prefix, trim.
+   * @param {string} name
+   * @returns {string}
+   */
+  function _normalizeProjectName(name) {
+    return (name || '')
+      .toLowerCase()
+      .replace(/^gcp\s*-\s*/i, '')
+      .replace(/^huawei\s*-\s*/i, '')
+      .trim();
+  }
+
+  /**
+   * Merges Cloud8 project list into existing provider projects.
+   * - Matches by normalized project name.
+   * - Enriches matched projects with Cloud8 tags + previousCost + change.
+   * - Flags unmatched Cloud8 entries as reconciliation_status: 'cloud8_only'.
+   * - Flags provider projects with no Cloud8 match as reconciliation_status: 'provider_only'.
+   * @param {Object[]} providerProjects - Projects from GCP/Huawei/backend
+   * @param {Object[]} cloud8Projects   - Projects parsed from Cloud8 CSV
+   * @returns {Object[]} Merged project list
+   */
+  function _mergeCloud8Projects(providerProjects, cloud8Projects) {
+    // Build lookup: normalizedName → cloud8 project
+    const cloud8Map = new Map();
+    for (const cp of cloud8Projects) {
+      cloud8Map.set(_normalizeProjectName(cp.name), cp);
+    }
+
+    const matchedCloud8Keys = new Set();
+
+    // Enrich provider projects with Cloud8 tags
+    const enriched = providerProjects.map(proj => {
+      const key = _normalizeProjectName(proj.name);
+      const cloud8 = cloud8Map.get(key);
+
+      if (!cloud8) {
+        return {
+          ...proj,
+          tags: { ...(proj.tags || {}), reconciliation_status: 'provider_only' }
+        };
+      }
+
+      matchedCloud8Keys.add(key);
+
+      const providerCost  = proj.currentCost || 0;
+      const cloud8Cost    = cloud8.currentCost || 0;
+      const costDelta     = providerCost - cloud8Cost;
+      const costDeltaPct  = cloud8Cost > 0
+        ? ((costDelta / cloud8Cost) * 100).toFixed(1)
+        : '0.0';
+
+      return {
+        ...proj,
+        previousCost: cloud8.previousCost || proj.previousCost || 0,
+        change: cloud8.change || proj.change || '0.0',
+        tags: {
+          ...(proj.tags || {}),
+          ...cloud8.tags,                        // all Cloud8 tags (org, env, source, periods…)
+          reconciliation_status: 'matched',
+          cloud8_cost:      cloud8Cost,
+          cloud8_prev_cost: cloud8.previousCost || 0,
+          cost_delta:       parseFloat(costDelta.toFixed(4)),
+          cost_delta_pct:   costDeltaPct
+        }
+      };
+    });
+
+    // Append Cloud8-only projects (exist in Cloud8 but not in any provider report)
+    const cloud8Only = cloud8Projects
+      .filter(cp => !matchedCloud8Keys.has(_normalizeProjectName(cp.name)))
+      .map(cp => ({
+        ...cp,
+        provider: cp.provider || 'gcp',
+        tags: {
+          ...(cp.tags || {}),
+          reconciliation_status: 'cloud8_only'
+        }
+      }));
+
+    return [...enriched, ...cloud8Only];
   }
 
   /**
@@ -310,12 +396,30 @@ const DataBus = (() => {
     const updated = { ...unified };
 
     if (csvOverrides.projects) {
-      const csvProjects = csvOverrides.projects.map(p => ({ ...p, provider: 'csv' }));
-      updated.projects = [...(unified.projects || []), ...csvProjects];
-      updated.summary = {
-        ...unified.summary,
-        activeProjects: updated.projects.length
-      };
+      const isCloud8 = csvOverrides.projects_format === 'cloud8';
+
+      if (isCloud8) {
+        // Merge Cloud8 tags into existing provider projects
+        updated.projects = _mergeCloud8Projects(
+          unified.projects || [],
+          csvOverrides.projects
+        );
+
+        // Build reconciliation summary
+        const matched      = updated.projects.filter(p => p.tags?.reconciliation_status === 'matched').length;
+        const providerOnly = updated.projects.filter(p => p.tags?.reconciliation_status === 'provider_only').length;
+        const cloud8Only   = updated.projects.filter(p => p.tags?.reconciliation_status === 'cloud8_only').length;
+
+        updated.cloud8Reconciliation = { matched, providerOnly, cloud8Only, total: updated.projects.length };
+      } else {
+        // Generic CSV: just append
+        updated.projects = [
+          ...(unified.projects || []),
+          ...csvOverrides.projects.map(p => ({ ...p, provider: p.provider || 'csv' }))
+        ];
+      }
+
+      updated.summary = { ...unified.summary, activeProjects: updated.projects.length };
     }
 
     if (csvOverrides.waste) {
@@ -343,7 +447,8 @@ const DataBus = (() => {
     onUpdate,
     aggregate,
     mergeTimelines,
-    injectCSVData
+    injectCSVData,
+    getReconciliation: () => cache?.cloud8Reconciliation || null
   };
 })();
 
