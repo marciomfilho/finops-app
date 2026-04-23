@@ -10,7 +10,6 @@ const GCP_API = (() => {
   const SCOPES = [
     'https://www.googleapis.com/auth/cloud-billing.readonly',
     'https://www.googleapis.com/auth/cloud-platform.read-only',
-    'https://www.googleapis.com/auth/recommender.readonly',
     'profile', 'email'
   ].join(' ');
 
@@ -151,7 +150,10 @@ const GCP_API = (() => {
     }
     try {
       const accounts = await getBillingAccounts();
-      if (!accounts.length) return _gcpDemoFallback(period);
+      if (!accounts.length) {
+        if (typeof App !== 'undefined') App.showToast('Nenhuma Conta de Faturamento encontrada. Verifique se você tem o papel "Billing Account Viewer".', 'error');
+        return _gcpDemoFallback(period);
+      }
 
       const billingId = accounts[0].name;
       const endDate = new Date();
@@ -166,13 +168,18 @@ const GCP_API = (() => {
       return _normalizeToProviderData(costData, budgets, period);
     } catch (err) {
       console.error('[GCP_API] fetchData error:', err);
-      return _gcpDemoFallback(period);
+      if (typeof App !== 'undefined') App.showToast('Erro ao buscar dados do GCP: ' + err.message, 'error');
+      // Retorna estrutura vazia em vez de demo para evitar confusão
+      return { id: 'gcp', provider: 'gcp', projects: [], summary: { currentCost: 0, provider: 'gcp' } };
     }
   }
 
   function _normalizeToProviderData(costData, budgets, period) {
     const rows = costData.rows || [];
-    if (!rows.length) return _gcpDemoFallback(period);
+    if (!rows.length) {
+       console.warn('[GCP_API] No rows returned from billing query');
+       // Não faz fallback para demo se chegamos aqui
+    }
 
     const projectMap = new Map();
     for (const row of rows) {

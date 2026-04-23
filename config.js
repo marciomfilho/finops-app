@@ -22,7 +22,7 @@
 // ── Google Cloud Platform ────────────────────────────────────────────────────
 // Cole aqui o Client ID gerado no Google Cloud Console
 // Formato: 123456789-abcdefg.apps.googleusercontent.com
-window.GCP_CLIENT_ID = 'SEU_CLIENT_ID_AQUI.apps.googleusercontent.com';
+window.GCP_CLIENT_ID = '1032791868270-2foclg2vcfpuc7pvjfggf8rp1ngtk6t3.apps.googleusercontent.com';
 
 // Opcional: ID da conta de faturamento padrão
 // window.GCP_BILLING_ACCOUNT = 'billingAccounts/XXXXXX-XXXXXX-XXXXXX';
