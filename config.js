@@ -45,4 +45,4 @@ window.GEMINI_API_KEY = '';
 // ── Backend Proxy ─────────────────────────────────────────────────────────────
 // URL do backend proxy (Cloud Run). Deixe vazio para usar apenas dados demo/diretos.
 // Exemplo: 'https://finops-backend-XXXX-uc.a.run.app'
-window.BACKEND_URL = '';
+window.BACKEND_URL = 'http://localhost:8080';

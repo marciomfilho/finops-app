@@ -5,7 +5,6 @@
  */
 
 const REQUIRED_VARS = [
-  'CORPORATE_DOMAIN',
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
   'GCP_PROJECT_ID',
@@ -28,7 +27,7 @@ export const ENV = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT || '8080', 10),
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:3000',
-  CORPORATE_DOMAIN: process.env.CORPORATE_DOMAIN,
+  CORPORATE_DOMAIN: process.env.CORPORATE_DOMAIN || 'exa.com.br',
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
   GCP_PROJECT_ID: process.env.GCP_PROJECT_ID,
