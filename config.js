@@ -22,7 +22,7 @@
 // ── Google Cloud Platform ────────────────────────────────────────────────────
 // Cole aqui o Client ID gerado no Google Cloud Console
 // Formato: 123456789-abcdefg.apps.googleusercontent.com
-window.GCP_CLIENT_ID = 'SEU_CLIENT_ID_AQUI.apps.googleusercontent.com';
+window.GCP_CLIENT_ID = '1032791868270-2foclg2vcfpuc7pvjfggf8rp1ngtk6t3.apps.googleusercontent.com';
 
 // Opcional: ID da conta de faturamento padrão
 // window.GCP_BILLING_ACCOUNT = 'billingAccounts/XXXXXX-XXXXXX-XXXXXX';
@@ -45,4 +45,4 @@ window.GEMINI_API_KEY = '';
 // ── Backend Proxy ─────────────────────────────────────────────────────────────
 // URL do backend proxy (Cloud Run). Deixe vazio para usar apenas dados demo/diretos.
 // Exemplo: 'https://finops-backend-XXXX-uc.a.run.app'
-window.BACKEND_URL = '';
+window.BACKEND_URL = 'http://localhost:8080';

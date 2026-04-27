@@ -24,7 +24,7 @@ const App = (() => {
     // Re-render current page whenever DataBus fires an update
     DataBus.onUpdate(data => {
       isDemo = !!data.isDemo;
-      _updateDemoBadge(isDemo);
+      _updateDataStatus(isDemo);
       updateLastUpdate();
       const activePage = document.querySelector('.nav-item.active');
       if (activePage) renderPage(activePage.dataset.page);
@@ -169,6 +169,11 @@ const App = (() => {
   async function _loadData() {
     showLoading();
     try {
+      // Se estiver usando GCP direto e autenticado, busca o perfil do usuário
+      if (GCP_API.isAuthenticated() && !GCP_API.currentUser) {
+        try { await GCP_API.getUserInfo(); } catch (e) { console.warn('User info fetch failed:', e); }
+      }
+
       const data = await DataBus.load(currentPeriod);
       isDemo = !!data.isDemo;
       _renderApp(data);
@@ -196,7 +201,7 @@ const App = (() => {
 
     const user = data.user || (GCP_API.currentUser) || { name: 'Usuário', org: 'FinOps V2' };
     _setUserInfo(user);
-    _updateDemoBadge(isDemo);
+    _updateDataStatus(isDemo);
     updateLastUpdate();
 
     bindNavEvents();
@@ -221,9 +226,18 @@ const App = (() => {
     }
   }
 
-  function _updateDemoBadge(demo) {
-    const badge = document.getElementById('demo-badge');
-    if (badge) badge.classList.toggle('hidden', !demo);
+  function _updateDataStatus(demo) {
+    const badge = document.getElementById('data-status-badge');
+    if (!badge) return;
+
+    const text = badge.querySelector('.status-text');
+    if (demo) {
+      badge.className = 'data-status-badge status-demo';
+      if (text) text.textContent = 'MODO DEMONSTRAÇÃO';
+    } else {
+      badge.className = 'data-status-badge status-real';
+      if (text) text.textContent = 'CONECTADO: DADOS REAIS';
+    }
   }
 
   function updateLastUpdate() {
