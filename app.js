@@ -329,6 +329,9 @@ const App = (() => {
       case 'ai-chat':
         if (typeof AIChatPage !== 'undefined') AIChatPage.render();
         break;
+      case 'okrs':
+        if (typeof OKRsPage !== 'undefined') OKRsPage.render();
+        break;
       default:
         break;
     }

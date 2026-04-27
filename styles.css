@@ -1208,3 +1208,193 @@ canvas { max-height: 280px; }
 .form-input:focus { border-color: var(--blue); }
 .form-input::placeholder { color: var(--text3); }
 .form-input[type="password"] { letter-spacing: 2px; }
+
+/* ===== OKRs / KPIs PAGE ===== */
+.okr-page { display: flex; flex-direction: column; gap: 24px; }
+
+/* Summary bar */
+.okr-summary {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  padding: 20px 24px;
+  animation: fadeInUp 0.3s ease both;
+}
+.okr-summary-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.okr-summary-avg {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--blue-light);
+}
+.okr-summary-bar {
+  height: 8px;
+  background: var(--bg3);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.okr-summary-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue), var(--green));
+  border-radius: 4px;
+  transition: width 0.8s ease;
+}
+.okr-summary-stats {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.okr-stat { font-size: 12px; font-weight: 600; }
+.okr-stat--done     { color: var(--green); }
+.okr-stat--progress { color: var(--yellow); }
+.okr-stat--risk     { color: var(--orange); }
+.okr-stat--none     { color: var(--text3); }
+
+/* Grid */
+.okr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+/* Card */
+.okr-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  display: flex;
+  transition: var(--transition);
+  animation: fadeInUp 0.4s ease both;
+}
+.okr-card:hover { border-color: var(--blue); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+
+.okr-card-accent {
+  width: 4px;
+  flex-shrink: 0;
+  border-radius: var(--card-radius) 0 0 var(--card-radius);
+}
+
+.okr-card-body { flex: 1; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+
+.okr-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.okr-index {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: 0.5px;
+}
+
+/* Status badges */
+.okr-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.okr-status--done       { background: rgba(0,196,140,0.15);  color: var(--green); }
+.okr-status--on-track   { background: rgba(0,196,140,0.12);  color: var(--green); }
+.okr-status--progress   { background: rgba(255,184,0,0.15);  color: var(--yellow); }
+.okr-status--risk       { background: rgba(255,107,53,0.15); color: var(--orange); }
+.okr-status--none       { background: var(--bg3);            color: var(--text3); }
+
+.okr-title { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.3; }
+.okr-desc  { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+.okr-target, .okr-vision {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text3);
+}
+.okr-target-label {
+  font-weight: 700;
+  color: var(--text3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.okr-target-text { color: var(--text2); }
+
+/* Progress row */
+.okr-progress-row {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.okr-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.okr-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.okr-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease, background 0.3s ease;
+}
+.okr-pct {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text2);
+  min-width: 36px;
+  text-align: right;
+}
+
+.okr-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.okr-input-label {
+  font-size: 11px;
+  color: var(--text3);
+  white-space: nowrap;
+}
+.okr-input {
+  width: 80px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  outline: none;
+  text-align: right;
+  transition: var(--transition);
+}
+.okr-input:focus { border-color: var(--blue); }
+.okr-unit {
+  font-size: 11px;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .okr-grid { grid-template-columns: 1fr; }
+  .okr-summary-stats { gap: 12px; }
+}
