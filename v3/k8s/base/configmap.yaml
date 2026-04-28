@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finops-config
+  namespace: finops
+data:
+  NODE_ENV: "production"
+  CORPORATE_DOMAIN: "suaempresa.com.br"
+  FRONTEND_URL: "https://finops.suaempresa.com.br"
+  AUTH_SERVICE_URL: "http://auth-service:3001"
+  BILLING_SERVICE_URL: "http://billing-service:3002"
+  CHAT_SERVICE_URL: "http://chat-service:3003"
+  RAG_SIMILARITY_THRESHOLD: "0.75"
+  RAG_MAX_CHUNKS: "10"
+  RAG_MAX_TOKENS: "8000"
+  RATE_LIMIT_WINDOW_MS: "60000"
+  RATE_LIMIT_MAX: "120"

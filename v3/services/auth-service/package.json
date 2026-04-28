@@ -1,0 +1,11 @@
+{
+  "name": "finops-auth-service",
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": { "start": "node src/index.js", "dev": "node --watch src/index.js" },
+  "dependencies": {
+    "@google-cloud/secret-manager": "^5.6.0",
+    "@supabase/supabase-js": "^2.103.3",
+    "express": "^4.22.1"
+  }
+}

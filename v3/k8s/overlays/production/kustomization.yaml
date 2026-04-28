@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+# Substitui PROJECT_ID em todos os manifests
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: gcr.io/SEU_PROJECT_ID/finops-api-gateway:latest
+    target:
+      kind: Deployment
+      name: api-gateway
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: gcr.io/SEU_PROJECT_ID/finops-auth-service:latest
+    target:
+      kind: Deployment
+      name: auth-service
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: gcr.io/SEU_PROJECT_ID/finops-billing-service:latest
+    target:
+      kind: Deployment
+      name: billing-service
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: gcr.io/SEU_PROJECT_ID/finops-chat-service:latest
+    target:
+      kind: Deployment
+      name: chat-service
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: gcr.io/SEU_PROJECT_ID/finops-frontend:latest
+    target:
+      kind: Deployment
+      name: frontend
+  - patch: |-
+      - op: replace
+        path: /spec/jobTemplate/spec/template/spec/containers/0/image
+        value: gcr.io/SEU_PROJECT_ID/finops-sync-job:latest
+    target:
+      kind: CronJob
+      name: sync-job
+
+# Atualiza o domínio no ConfigMap
+configMapGenerator:
+  - name: finops-config
+    behavior: merge
+    literals:
+      - CORPORATE_DOMAIN=suaempresa.com.br
+      - FRONTEND_URL=https://finops.suaempresa.com.br

@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: finops-ingress
+  namespace: finops
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "finops-ip"
+    networking.gke.io/managed-certificates: "finops-cert"
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  rules:
+  - host: finops.suaempresa.com.br
+    http:
+      paths:
+      # Frontend — raiz
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
+      # API Gateway — todas as rotas /auth e /api
+      - path: /auth
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8080
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: api-gateway
+            port:
+              number: 8080
+---
+# Certificado TLS gerenciado pelo GKE
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: finops-cert
+  namespace: finops
+spec:
+  domains:
+  - finops.suaempresa.com.br

@@ -1,0 +1,58 @@
+version: "3.9"
+
+# Desenvolvimento local — sobe todos os microserviços + frontend
+# Uso: docker-compose up --build
+
+services:
+
+  api-gateway:
+    build: ./services/api-gateway
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      AUTH_SERVICE_URL:    http://auth-service:3001
+      BILLING_SERVICE_URL: http://billing-service:3002
+      CHAT_SERVICE_URL:    http://chat-service:3003
+    depends_on:
+      - auth-service
+      - billing-service
+      - chat-service
+
+  auth-service:
+    build: ./services/auth-service
+    ports:
+      - "3001:3001"
+    env_file: .env
+    environment:
+      PORT: "3001"
+
+  billing-service:
+    build: ./services/billing-service
+    ports:
+      - "3002:3002"
+    env_file: .env
+    environment:
+      PORT: "3002"
+
+  chat-service:
+    build: ./services/chat-service
+    ports:
+      - "3003:3003"
+    env_file: .env
+    environment:
+      PORT: "3003"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: v3/frontend/Dockerfile
+    ports:
+      - "3000:80"
+
+  # Roda o sync-job manualmente: docker-compose run --rm sync-job
+  sync-job:
+    build: ./services/sync-job
+    env_file: .env
+    profiles:
+      - sync

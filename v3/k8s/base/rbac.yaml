@@ -1,0 +1,25 @@
+# Service Account para os pods acessarem o Secret Manager via Workload Identity
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: finops-sa
+  namespace: finops
+  annotations:
+    # Workload Identity: vincula ao GSA que tem acesso ao Secret Manager
+    iam.gke.io/gcp-service-account: finops-sa@PROJECT_ID.iam.gserviceaccount.com
+---
+# Secret com variáveis não-sensíveis (URLs do Supabase, anon key)
+# As chaves sensíveis vêm do Secret Manager em runtime
+apiVersion: v1
+kind: Secret
+metadata:
+  name: finops-secrets
+  namespace: finops
+type: Opaque
+stringData:
+  SUPABASE_URL: "https://xxxx.supabase.co"
+  SUPABASE_ANON_KEY: "eyJ..."
+  GOOGLE_CLIENT_ID: "xxxx.apps.googleusercontent.com"
+  GOOGLE_REDIRECT_URI: "https://finops.suaempresa.com.br/auth/callback"
+  GCP_PROJECT_ID: "seu-projeto-gcp"
+  BILLING_ACCOUNT_ID: "billingAccounts/XXXXXX-XXXXXX-XXXXXX"
